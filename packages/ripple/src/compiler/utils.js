@@ -1,5 +1,6 @@
 import { build_assignment_value } from '../utils/ast.js';
 import * as b from '../utils/builders.js';
+import { get_attribute_event_name, is_delegated, is_event_attribute } from '../utils/events.js';
 
 const regex_return_characters = /\r/g;
 
@@ -144,47 +145,6 @@ const DOM_PROPERTIES = [
 
 export function is_dom_property(name) {
   return DOM_PROPERTIES.includes(name);
-}
-
-/** List of Element events that will be delegated */
-const DELEGATED_EVENTS = [
-  'beforeinput',
-  'click',
-  'change',
-  'dblclick',
-  'contextmenu',
-  'focusin',
-  'focusout',
-  'input',
-  'keydown',
-  'keyup',
-  'mousedown',
-  'mousemove',
-  'mouseout',
-  'mouseover',
-  'mouseup',
-  'pointerdown',
-  'pointermove',
-  'pointerout',
-  'pointerover',
-  'pointerup',
-  'touchend',
-  'touchmove',
-  'touchstart',
-];
-
-export function is_delegated(event_name) {
-  return DELEGATED_EVENTS.includes(event_name);
-}
-
-const PASSIVE_EVENTS = ['touchstart', 'touchmove'];
-
-export function is_passive_event(name) {
-  return PASSIVE_EVENTS.includes(name);
-}
-
-export function is_event_attribute(attr) {
-  return attr.startsWith('on') && attr.length > 2 && attr[2] === attr[2].toUpperCase();
 }
 
 const unhoisted = { hoisted: false };
@@ -354,6 +314,30 @@ export function build_hoisted_params(node, context) {
   return params;
 }
 
+export function is_top_level_await(context) {
+  if (!is_inside_component(context)) {
+    return false;
+  }
+
+  for (let i = context.path.length - 1; i >= 0; i -= 1) {
+    const context_node = context.path[i];
+    const type = context_node.type;
+
+    if (type === 'Component') {
+      return true;
+    }
+
+    if (
+      type === 'FunctionExpression' ||
+      type === 'ArrowFunctionExpression' ||
+      type === 'FunctionDeclaration'
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function is_inside_component(context, includes_functions = false) {
   for (let i = context.path.length - 1; i >= 0; i -= 1) {
     const context_node = context.path[i];
@@ -413,10 +397,6 @@ export function is_inside_call_expression(context) {
   return false;
 }
 
-export function is_tracked_name(name) {
-  return typeof name === 'string' && name.startsWith('$') && name.length > 1 && name[1] !== '$';
-}
-
 export function is_value_static(node) {
   if (node.type === 'Literal') {
     return true;
@@ -432,33 +412,6 @@ export function is_value_static(node) {
   }
 
   return false;
-}
-
-export function is_tracked_computed_property(object, property, context) {
-  if (object.tracked) {
-    return false;
-  }
-  const binding = context.state.scope.get(object.name);
-
-  if (binding) {
-    const initial = binding.initial;
-    if (initial && is_value_static(initial)) {
-      return false;
-    }
-  }
-  if (property.type === 'Identifier') {
-    return true;
-  }
-  if (
-    property.type === 'Literal' &&
-    typeof property.value === 'string' &&
-    is_tracked_name(property.value)
-  ) {
-    return true;
-  }
-
-  // TODO: do we need to handle more logic here? default to false for now
-  return true;
 }
 
 export function is_ripple_import(callee, context) {
@@ -658,51 +611,11 @@ export function hash(str) {
   return (hash >>> 0).toString(36);
 }
 
-const common_dom_names = new Set([
-  'div',
-  'span',
-  'input',
-  'textarea',
-  'select',
-  'button',
-  'a',
-  'p',
-  'img',
-  'form',
-  'label',
-  'ul',
-  'ol',
-  'li',
-  'table',
-  'thead',
-  'tbody',
-  'tr',
-  'td',
-  'th',
-  'section',
-  'header',
-  'footer',
-  'nav',
-  'main',
-  'article',
-  'aside',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-]);
-
-export function is_element_dom_element(node, context) {
-  if (node.id.type === 'Identifier' && node.id.name[0].toLowerCase() === node.id.name[0]) {
-    if (common_dom_names.has(node.id.name)) {
-      return true;
-    }
-    const binding = context.state.scope.get(node.id.name);
-    if (binding == null) {
-      return true;
-    }
-  }
-  return false;
+export function is_element_dom_element(node) {
+  return (
+    node.id.type === 'Identifier' &&
+    node.id.name[0].toLowerCase() === node.id.name[0] &&
+    node.id.name !== 'children' &&
+    !node.id.tracked
+  );
 }

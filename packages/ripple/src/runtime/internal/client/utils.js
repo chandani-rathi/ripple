@@ -1,5 +1,3 @@
-import { TRACKED_OBJECT } from './constants.js';
-
 export var get_descriptor = Object.getOwnPropertyDescriptor;
 export var get_descriptors = Object.getOwnPropertyDescriptors;
 export var array_from = Array.from;
@@ -19,17 +17,13 @@ export function create_anchor() {
 }
 
 /**
- * @param {any} obj
- * @returns {boolean}
- */
-export function is_ripple_array(obj) {
-  return is_array(obj) && TRACKED_OBJECT in obj && '$length' in obj;
-}
-
-/**
  * @param {any} value
  * @returns {boolean}
  */
 export function is_positive_integer(value) {
   return Number.isInteger(value) && /**@type {number} */ (value) >= 0;
+}
+
+export function is_tracked_object(v) {
+  return typeof v === 'object' && v !== null && typeof v.f === 'number';
 }
