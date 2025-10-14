@@ -181,6 +181,15 @@ effect(() => {
 ```
 
 > Note: you cannot create `Tracked` objects in module/global scope, they have to be created on access from an active component context.
+> And to get and set tracked value outside of ripple module, use inbuild get / set utilities
+> ```jsx
+> //in .ts file
+> import { get, set } "ripple";
+> 
+> let count = track(0);
+> const countValue = get(count);
+> set(count, 4)
+> ``` 
 
 #### track with get / set
 
