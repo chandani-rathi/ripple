@@ -1272,6 +1272,230 @@ function bind_element_rect(maybe_tracked, type) {
 			const result = await format(expected, { singleQuote: true, printWidth: 100 });
 			expect(result).toBeWithNewline(expected);
 		});
+
+		it('should format function calls with long string literals correctly', async () => {
+			const input = `for (const quasi of template.quasis) {
+    quasi.value.raw = sanitize_template_string(/** @type {string} */(quasi.value.cooked));
+}`;
+
+			const expected = `for (const quasi of template.quasis) {
+  quasi.value.raw = sanitize_template_string(
+    /** @type {string} */ (quasi.value.cooked),
+  );
+}`;
+
+			const result = await format(input, { singleQuote: true, printWidth: 80 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should break up call expressions on new lines with inline jsdoc comments with printWidth 100', async () => {
+			const input = `for (const quasi of template.quasis) {
+  quasi.value.raw = sanitize_template_string(/** @type {string} */ (quasi.value.cooked));
+}
+
+const program = /** @type {Program} */ (walk(/** @type {Node} */ (analysis.ast), { ...state, namespace: 'html' }, visitors));`;
+
+			const expected = `for (const quasi of template.quasis) {
+  quasi.value.raw = sanitize_template_string(/** @type {string} */ (quasi.value.cooked));
+}
+
+const program = /** @type {Program} */ (
+  walk(/** @type {Node} */ (analysis.ast), { ...state, namespace: 'html' }, visitors)
+);`;
+
+			const result = await format(input, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should break up call expressions on new lines with inline jsdoc comments with printWidth 30', async () => {
+			const input = `for (const quasi of template.quasis) {
+  quasi.value.raw = sanitize_template_string(/** @type {string} */ (quasi.value.cooked));
+}
+
+const program = /** @type {Program} */ (walk(/** @type {Node} */ (analysis.ast), { ...state, namespace: 'html' }, visitors));`;
+
+			const expected = `for (const quasi of template.quasis) {
+  quasi.value.raw =
+    sanitize_template_string(
+      /** @type {string} */ (
+        quasi.value.cooked
+      ),
+    );
+}
+
+const program =
+  /** @type {Program} */ (
+    walk(
+      /** @type {Node} */ (
+        analysis.ast
+      ),
+      {
+        ...state,
+        namespace: 'html',
+      },
+      visitors,
+    )
+  );`;
+
+			const result = await format(input, { singleQuote: true, printWidth: 30 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should properly format long jsdoc with call expressions', async () => {
+			const input = `const js = /** @type {ReturnType<typeof print> & { post_processing_changes?: PostProcessingChanges, line_offsets?: number[] }} */ (
+  print(program, language_handler, {
+    sourceMapContent: source,
+    sourceMapSource: path.basename(filename),
+  })
+);`;
+
+			const expected = `const js =
+  /** @type {ReturnType<typeof print> & { post_processing_changes?: PostProcessingChanges, line_offsets?: number[] }} */ (
+    print(program, language_handler, {
+      sourceMapContent: source,
+      sourceMapSource: path.basename(filename),
+    })
+  );`;
+
+			const result = await format(input, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should expand call arguments containing a regex literal with a block callback', async () => {
+			const input = String.raw`js.code = js.code.replace(/^(export\s+)declare\s+(function\s+\w+[^{\n]*;)$/gm, (match, p1, p2, offset) => {
+  const replacement = p1 + p2;
+  const line = offset_to_line(offset);
+  const delta = replacement.length - match.length; // negative (removing 'declare ')
+
+  // Track first change offset and total delta per line
+  if (!line_deltas.has(line)) {
+	line_deltas.set(line, { offset, delta });
+  } else {
+    // Additional change on same line - accumulate delta
+    // @ts-ignore
+    line_deltas.get(line).delta += delta;
+  }
+  return replacement;
+});`;
+
+			const expected = String.raw`js.code = js.code.replace(
+  /^(export\s+)declare\s+(function\s+\w+[^{\n]*;)$/gm,
+  (match, p1, p2, offset) => {
+    const replacement = p1 + p2;
+    const line = offset_to_line(offset);
+    const delta = replacement.length - match.length; // negative (removing 'declare ')
+
+    // Track first change offset and total delta per line
+    if (!line_deltas.has(line)) {
+      line_deltas.set(line, { offset, delta });
+    } else {
+      // Additional change on same line - accumulate delta
+      // @ts-ignore
+      line_deltas.get(line).delta += delta;
+    }
+    return replacement;
+  },
+);`;
+
+			const result = await format(input, { singleQuote: true, printWidth: 80 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should expand call arguments containing a regex literal with a block callback printWidth 40', async () => {
+			const input = String.raw`js.code = js.code.replace(/^(export\s+)declare\s+(function\s+\w+[^{\n]*;)$/gm, (match, p1, p2, offset) => {
+  const replacement = p1 + p2;
+  const line = offset_to_line(offset);
+  const delta = replacement.length - match.length; // negative (removing 'declare ')
+
+  // Track first change offset and total delta per line
+  if (!line_deltas.has(line)) {
+	line_deltas.set(line, { offset, delta });
+  } else {
+    // Additional change on same line - accumulate delta
+    // @ts-ignore
+    line_deltas.get(line).delta += delta;
+  }
+  return replacement;
+});`;
+
+			const expected = String.raw`js.code = js.code.replace(
+  /^(export\s+)declare\s+(function\s+\w+[^{\n]*;)$/gm,
+  (match, p1, p2, offset) => {
+    const replacement = p1 + p2;
+    const line = offset_to_line(offset);
+    const delta =
+      replacement.length - match.length; // negative (removing 'declare ')
+
+    // Track first change offset and total delta per line
+    if (!line_deltas.has(line)) {
+      line_deltas.set(line, {
+        offset,
+        delta,
+      });
+    } else {
+      // Additional change on same line - accumulate delta
+      // @ts-ignore
+      line_deltas.get(line).delta +=
+        delta;
+    }
+    return replacement;
+  },
+);`;
+
+			const result = await format(input, { singleQuote: true, printWidth: 40 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should expand call arguments containing a regex literal with a block callback printWidth 30', async () => {
+			const input = String.raw`js.code = js.code.replace(/^(export\s+)declare\s+(function\s+\w+[^{\n]*;)$/gm, (match, p1, p2, offset) => {
+  const replacement = p1 + p2;
+  const line = offset_to_line(offset);
+  const delta = replacement.length - match.length; // negative (removing 'declare ')
+
+  // Track first change offset and total delta per line
+  if (!line_deltas.has(line)) {
+	line_deltas.set(line, { offset, delta });
+  } else {
+    // Additional change on same line - accumulate delta
+    // @ts-ignore
+    line_deltas.get(line).delta += delta;
+  }
+  return replacement;
+});`;
+
+			const expected = String.raw`js.code = js.code.replace(
+  /^(export\s+)declare\s+(function\s+\w+[^{\n]*;)$/gm,
+  (match, p1, p2, offset) => {
+    const replacement =
+      p1 + p2;
+    const line =
+      offset_to_line(offset);
+    const delta =
+      replacement.length -
+      match.length; // negative (removing 'declare ')
+
+    // Track first change offset and total delta per line
+    if (
+      !line_deltas.has(line)
+    ) {
+      line_deltas.set(line, {
+        offset,
+        delta,
+      });
+    } else {
+      // Additional change on same line - accumulate delta
+      // @ts-ignore
+      line_deltas.get(
+        line,
+      ).delta += delta;
+    }
+    return replacement;
+  },
+);`;
+
+			const result = await format(input, { singleQuote: true, printWidth: 30 });
+			expect(result).toBeWithNewline(expected);
+		});
 	});
 
 	describe('edge cases', () => {
@@ -3118,6 +3342,24 @@ export component App() {
 }`;
 
 				const result = await format(input, { singleQuote: true });
+				expect(result).toBeWithNewline(expected);
+			});
+
+			it('should keep blank line between components with a trailing comment at the end of the first', async () => {
+				const expected = `component SVG({ children }) {
+  <svg width={20} height={20} fill="blue" viewBox="0 0 30 10" preserveAspectRatio="none">
+    let test = track(8);
+    {test}
+    <polygon points="0,0 30,0 15,10" />
+  </svg>
+  // <div><children /></div>
+}
+
+component Polygon() {
+  <polygon points="0,0 30,0 15,10" />
+}`;
+
+				const result = await format(expected, { singleQuote: true, printWidth: 100 });
 				expect(result).toBeWithNewline(expected);
 			});
 		});

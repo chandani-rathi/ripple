@@ -188,7 +188,17 @@ function createSkip(characters) {
 
 const skipSpaces = createSkip(' \t');
 const skipToLineEnd = createSkip(',; \t');
-const skipEverythingButNewLine = createSkip(/[^\n\r]/u);
+const skipEverythingButNewLine = createSkip(/[^\n\r\u2028\u2029]/u);
+
+function isCharNewLine(character) {
+	return (
+		character === '\n' || character === '\r' || character === '\u2028' || character === '\u2029'
+	);
+}
+
+function isCharSpace(character) {
+	return character === ' ' || character === '\t';
+}
 
 function skipInlineComment(text, startIndex) {
 	if (startIndex === false) {
@@ -217,24 +227,14 @@ function skipNewline(text, startIndex, options) {
 		if (text.charAt(startIndex - 1) === '\r' && character === '\n') {
 			return startIndex - 2;
 		}
-		if (
-			character === '\n' ||
-			character === '\r' ||
-			character === '\u2028' ||
-			character === '\u2029'
-		) {
+		if (isCharNewLine(character)) {
 			return startIndex - 1;
 		}
 	} else {
 		if (character === '\r' && text.charAt(startIndex + 1) === '\n') {
 			return startIndex + 2;
 		}
-		if (
-			character === '\n' ||
-			character === '\r' ||
-			character === '\u2028' ||
-			character === '\u2029'
-		) {
+		if (isCharNewLine(character)) {
 			return startIndex + 1;
 		}
 	}
@@ -252,6 +252,56 @@ function skipTrailingComment(text, startIndex) {
 	}
 
 	return startIndex;
+}
+
+function getNodeEndIndex(node) {
+	if (node?.loc?.end && typeof node.loc.end.index === 'number') {
+		return node.loc.end.index;
+	}
+	if (typeof node?.end === 'number') {
+		return node.end;
+	}
+	if (Array.isArray(node?.range) && typeof node.range[1] === 'number') {
+		return node.range[1];
+	}
+	return null;
+}
+
+function isRegExpLiteral(node) {
+	return (
+		node &&
+		((node.type === 'Literal' && !!node.regex) ||
+			node.type === 'RegExpLiteral' ||
+			(node.type === 'StringLiteral' &&
+				node.extra?.raw?.startsWith('/') &&
+				node.extra?.raw?.endsWith('/')))
+	);
+}
+
+function isCommentFollowedBySameLineParen(comment, options) {
+	if (!comment || !options || typeof options.originalText !== 'string') {
+		return false;
+	}
+
+	const text = options.originalText;
+	const endIndex = getNodeEndIndex(comment);
+	if (typeof endIndex !== 'number') {
+		return false;
+	}
+
+	let cursor = endIndex;
+	while (cursor < text.length) {
+		const character = text.charAt(cursor);
+		if (character === '(') {
+			return true;
+		}
+		if (isCharNewLine(character) || !isCharSpace(character)) {
+			return false;
+		}
+		cursor++;
+	}
+
+	return false;
 }
 
 function hasNewline(text, startIndex, options) {
@@ -419,10 +469,13 @@ function printRippleNode(node, path, options, print, args) {
 				parts.push('/*' + comment.value + '*/');
 
 				// Check if comment and node are on the same line (for inline JSDoc comments)
+				const isCommentInlineWithParen =
+					isLastComment && isCommentFollowedBySameLineParen(comment, options);
 				const isCommentOnSameLine =
 					isLastComment && comment.loc && node.loc && comment.loc.end.line === node.loc.start.line;
+				const shouldKeepOnSameLine = isCommentOnSameLine || isCommentInlineWithParen;
 
-				if (!isInlineContext && !isCommentOnSameLine) {
+				if (!isInlineContext && !shouldKeepOnSameLine) {
 					parts.push(hardline);
 
 					// Check if there should be blank lines between this comment and the next
@@ -982,12 +1035,24 @@ function printRippleNode(node, path, options, print, args) {
 			break;
 
 		case 'AssignmentExpression': {
-			let leftPart = path.call(print, 'left');
+			// Print left side with noBreakInside context to keep calls compact
+			let leftPart = path.call((p) => print(p, { noBreakInside: true }), 'left');
 			// Preserve parentheses around the left side when present
 			if (node.left.metadata?.parenthesized) {
 				leftPart = concat(['(', leftPart, ')']);
 			}
-			nodeContent = concat([leftPart, ' ', node.operator, ' ', path.call(print, 'right')]);
+			// For CallExpression on the right with JSDoc comments, use fluid layout strategy
+			const rightSide = path.call(print, 'right');
+
+			// Use fluid layout for assignments: allows breaking after operator first
+			const groupId = Symbol('assignment');
+			nodeContent = group([
+				group(leftPart),
+				' ',
+				node.operator,
+				group(indent(line), { id: groupId }),
+				indentIfBreak(rightSide, { groupId }),
+			]);
 			break;
 		}
 
@@ -1029,8 +1094,17 @@ function printRippleNode(node, path, options, print, args) {
 			let callContent = concat(parts);
 
 			// Preserve parentheses for type-annotated call expressions
+			// When parenthesized with leading comments, use grouping to allow breaking
 			if (node.metadata?.parenthesized) {
-				callContent = concat(['(', callContent, ')']);
+				const hasLeadingComments = node.leadingComments && node.leadingComments.length > 0;
+				if (hasLeadingComments) {
+					// Group with softline to allow breaking after opening paren
+					callContent = group(
+						concat(['(', indent(concat([softline, callContent])), softline, ')']),
+					);
+				} else {
+					callContent = concat(['(', callContent, ')']);
+				}
 			}
 			nodeContent = callContent;
 			break;
@@ -1352,7 +1426,15 @@ function printRippleNode(node, path, options, print, args) {
 			break;
 		}
 
-		case 'BinaryExpression':
+		case 'BinaryExpression': {
+			// Check if we're in an assignment/declaration context where parent handles indentation
+			const parent = path.getParentNode();
+			const shouldNotIndent =
+				parent &&
+				(parent.type === 'VariableDeclarator' ||
+					parent.type === 'AssignmentExpression' ||
+					parent.type === 'AssignmentPattern');
+
 			// Don't add indent if we're in a conditional test context
 			if (args?.isConditionalTest) {
 				nodeContent = group(
@@ -1366,6 +1448,16 @@ function printRippleNode(node, path, options, print, args) {
 						]),
 					]),
 				);
+			} else if (shouldNotIndent) {
+				// In assignment context, don't add indent - parent will handle it
+				nodeContent = group(
+					concat([
+						path.call(print, 'left'),
+						' ',
+						node.operator,
+						concat([line, path.call(print, 'right')]),
+					]),
+				);
 			} else {
 				nodeContent = group(
 					concat([
@@ -1377,7 +1469,7 @@ function printRippleNode(node, path, options, print, args) {
 				);
 			}
 			break;
-
+		}
 		case 'LogicalExpression':
 			// Don't add indent if we're in a conditional test context
 			if (args?.isConditionalTest) {
@@ -2262,7 +2354,13 @@ function shouldHugLastArgument(args, argumentBreakFlags) {
 
 	for (let index = 0; index < lastIndex; index++) {
 		const argument = args[index];
-		if (isSpreadLike(argument) || hasComment(argument) || argumentBreakFlags[index]) {
+		if (
+			isSpreadLike(argument) ||
+			hasComment(argument) ||
+			isBlockLikeFunction(argument) ||
+			isRegExpLiteral(argument) ||
+			argumentBreakFlags[index]
+		) {
 			return false;
 		}
 	}
@@ -2276,8 +2374,22 @@ function shouldHugArrowFunctions(args) {
 		return false;
 	}
 
-	// If any argument is an arrow function with a block body, we should hug
-	return args.some((arg) => isBlockLikeFunction(arg));
+	// Only hug when the first argument is the block-like callback and there
+	// are no other block-like callbacks later in the list. This mirrors how
+	// Prettier keeps patterns like useEffect(() => {}, deps) inline while
+	// allowing suffix callbacks (e.g. foo(regex, () => {})) to expand.
+	const firstBlockIndex = args.findIndex((arg) => isBlockLikeFunction(arg));
+	if (firstBlockIndex !== 0) {
+		return false;
+	}
+
+	for (let index = 1; index < args.length; index++) {
+		if (isBlockLikeFunction(args[index])) {
+			return false;
+		}
+	}
+
+	return firstBlockIndex === 0;
 }
 
 function printCallArguments(path, options, print) {
@@ -2288,6 +2400,16 @@ function printCallArguments(path, options, print) {
 		return '()';
 	}
 
+	// Check if last argument can be expanded (object or array)
+	const finalArg = args[args.length - 1];
+	const couldExpandLastArg =
+		finalArg &&
+		(finalArg.type === 'ObjectExpression' ||
+			finalArg.type === 'TrackedObjectExpression' ||
+			finalArg.type === 'ArrayExpression' ||
+			finalArg.type === 'TrackedArrayExpression') &&
+		!hasComment(finalArg);
+
 	const printedArguments = [];
 	const argumentDocs = [];
 	const argumentBreakFlags = [];
@@ -2296,7 +2418,10 @@ function printCallArguments(path, options, print) {
 	path.each((argumentPath, index) => {
 		const isLast = index === args.length - 1;
 		const argumentNode = args[index];
-		const argumentDoc = print(argumentPath, { isInlineContext: true });
+		const printOptions = isBlockLikeFunction(argumentNode) ? undefined : { isInlineContext: true };
+
+		// Print normally (not with expandLastArg yet - we'll do that later if needed)
+		const argumentDoc = print(argumentPath, printOptions);
 
 		argumentDocs.push(argumentDoc);
 		// Arrow functions with block bodies have internal breaks but shouldn't
@@ -2315,7 +2440,6 @@ function printCallArguments(path, options, print) {
 			printedArguments.push(argumentDoc);
 		}
 	}, 'arguments');
-
 	const trailingComma = shouldPrintComma(options, 'all') ? ',' : '';
 
 	// Special case: single array argument should keep opening bracket inline
@@ -2330,6 +2454,7 @@ function printCallArguments(path, options, print) {
 		return concat(['(', argumentDocs[0], ')']);
 	} // Check if we should hug arrow functions (keep params inline even when body breaks)
 	const shouldHugArrows = shouldHugArrowFunctions(args);
+	let huggedArrowDoc = null;
 
 	// For arrow functions, we want to keep params on same line as opening paren
 	// but allow the block body to break naturally
@@ -2345,9 +2470,7 @@ function printCallArguments(path, options, print) {
 		}
 
 		huggedParts.push(')');
-
-		// Don't use group - just concat to allow arrow function blocks to control breaking
-		return concat(huggedParts);
+		huggedArrowDoc = concat(huggedParts);
 	}
 
 	// Build standard breaking version with indentation
@@ -2359,12 +2482,89 @@ function printCallArguments(path, options, print) {
 		')',
 	];
 
-	// Force break only if there are explicit empty lines between arguments
 	const shouldForceBreak = anyArgumentHasEmptyLine;
+	const shouldBreakForContent = argumentDocs.some((docPart) => docPart && willBreak(docPart));
 
 	const groupedContents = group(contents, {
-		shouldBreak: shouldForceBreak,
+		shouldBreak: shouldForceBreak || shouldBreakForContent,
 	});
+
+	if (huggedArrowDoc) {
+		return conditionalGroup([huggedArrowDoc, groupedContents]);
+	}
+
+	const lastIndex = args.length - 1;
+	const lastArg = args[lastIndex];
+	const lastArgDoc = argumentDocs[lastIndex];
+	const lastArgBreaks = lastArgDoc ? willBreak(lastArgDoc) : false;
+	const previousArgsBreak =
+		lastIndex > 0 ? argumentBreakFlags.slice(0, lastIndex).some(Boolean) : false;
+	const isExpandableLastArgType =
+		lastArg &&
+		(lastArg.type === 'ObjectExpression' ||
+			lastArg.type === 'TrackedObjectExpression' ||
+			lastArg.type === 'ArrayExpression' ||
+			lastArg.type === 'TrackedArrayExpression');
+
+	// Check if we should expand the last argument (like Prettier's shouldExpandLastArg)
+	const shouldExpandLast =
+		args.length > 1 && couldExpandLastArg && !previousArgsBreak && !anyArgumentHasEmptyLine;
+
+	if (shouldExpandLast) {
+		const headArgs = argumentDocs.slice(0, -1);
+
+		// Re-print the last arg with expandLastArg: true
+		const expandedLastArg = path.call(
+			(argPath) => print(argPath, { isInlineContext: true, expandLastArg: true }),
+			'arguments',
+			lastIndex,
+		);
+
+		// Build the inline version: head args inline + expanded last arg
+		const inlinePartsWithExpanded = ['('];
+		for (let index = 0; index < headArgs.length; index++) {
+			if (index > 0) {
+				inlinePartsWithExpanded.push(', ');
+			}
+			inlinePartsWithExpanded.push(headArgs[index]);
+		}
+		if (headArgs.length > 0) {
+			inlinePartsWithExpanded.push(', ');
+		}
+		inlinePartsWithExpanded.push(group(expandedLastArg, { shouldBreak: true }));
+		inlinePartsWithExpanded.push(')');
+
+		return conditionalGroup([
+			// Try with normal formatting first
+			concat(['(', ...argumentDocs.flatMap((doc, i) => (i > 0 ? [', ', doc] : [doc])), ')']),
+			// Then try with expanded last arg
+			concat(inlinePartsWithExpanded),
+			// Finally fall back to all args broken out
+			groupedContents,
+		]);
+	}
+
+	const canInlineLastArg =
+		args.length > 1 &&
+		isExpandableLastArgType &&
+		lastArgBreaks &&
+		!previousArgsBreak &&
+		!anyArgumentHasEmptyLine &&
+		!hasComment(lastArg);
+
+	if (canInlineLastArg) {
+		const inlineParts = ['('];
+		for (let index = 0; index < argumentDocs.length; index++) {
+			if (index > 0) {
+				inlineParts.push(', ');
+			}
+			inlineParts.push(argumentDocs[index]);
+		}
+		inlineParts.push(')');
+
+		return conditionalGroup([concat(inlineParts), groupedContents]);
+	}
+
 	if (!anyArgumentHasEmptyLine && shouldHugLastArgument(args, argumentBreakFlags)) {
 		const lastIndex = args.length - 1;
 		const inlineParts = ['('];
@@ -2433,18 +2633,19 @@ function printFunctionDeclaration(node, path, options, print) {
 }
 
 function printIfStatement(node, path, options, print) {
-	const parts = [];
-	parts.push('if (');
-	parts.push(path.call(print, 'test'));
-	parts.push(') ');
-	parts.push(path.call(print, 'consequent'));
+	const test = path.call(print, 'test');
+	const consequent = path.call(print, 'consequent');
+
+	// Use group to allow breaking the test when it doesn't fit
+	const testDoc = group(concat(['if (', indent(concat([softline, test])), softline, ')']));
+
+	const parts = [testDoc, ' ', consequent];
 
 	if (node.alternate) {
-		parts.push(' else ');
-		parts.push(path.call(print, 'alternate'));
+		parts.push(' else ', path.call(print, 'alternate'));
 	}
 
-	return parts;
+	return concat(parts);
 }
 
 function printForOfStatement(node, path, options, print) {
@@ -2848,13 +3049,27 @@ function printMemberExpression(node, path, options, print) {
 	}
 	const propertyPart = path.call(print, 'property');
 
+	let result;
 	if (node.computed) {
 		const openBracket = node.optional ? '?.[' : '[';
-		return concat([objectPart, openBracket, propertyPart, ']']);
+		result = concat([objectPart, openBracket, propertyPart, ']']);
 	} else {
 		const separator = node.optional ? '?.' : '.';
-		return concat([objectPart, separator, propertyPart]);
+		result = concat([objectPart, separator, propertyPart]);
 	}
+
+	// Preserve parentheses around the entire member expression when present
+	if (node.metadata?.parenthesized) {
+		// Check if there are leading comments - if so, use group with softlines to allow breaking
+		const hasLeadingComments = node.leadingComments && node.leadingComments.length > 0;
+		if (hasLeadingComments) {
+			result = group(concat(['(', indent(concat([softline, result])), softline, ')']));
+		} else {
+			result = concat(['(', result, ')']);
+		}
+	}
+
+	return result;
 }
 
 function printUnaryExpression(node, path, options, print) {
@@ -3569,7 +3784,35 @@ function printVariableDeclarator(node, path, options, print) {
 			}
 		}
 
-		return concat([id, ' = ', init]);
+		// For BinaryExpression or LogicalExpression, use break-after-operator layout
+		// This allows the expression to break naturally based on print width
+		const isBinaryish =
+			node.init.type === 'BinaryExpression' || node.init.type === 'LogicalExpression';
+		if (isBinaryish) {
+			// Use Prettier's break-after-operator strategy: break after = and let the expression break naturally
+			const init = path.call(print, 'init');
+			return group([group(id), ' =', group(indent(concat([line, init])))]);
+		}
+		// For CallExpression inits, use fluid layout strategy to break after = if needed
+		const isCallExpression = node.init.type === 'CallExpression';
+		if (isCallExpression) {
+			// Always use fluid layout for call expressions
+			// This allows breaking after = when the whole line doesn't fit
+			{
+				// Use fluid layout: break right side first, then break after = if needed
+				const groupId = Symbol('declaration');
+				return group([
+					group(id),
+					' =',
+					group(indent(line), { id: groupId }),
+					indentIfBreak(init, { groupId }),
+				]);
+			}
+		}
+
+		// Default: simple inline format with space
+		// Use group to allow breaking if needed - but keep inline when it fits
+		return group(concat([id, ' = ', init]));
 	}
 
 	return path.call(print, 'id');

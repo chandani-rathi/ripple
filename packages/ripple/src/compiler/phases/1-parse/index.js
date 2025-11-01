@@ -39,6 +39,8 @@ const regex_whitespace_only = /\s/;
  */
 function skipWhitespace(parser) {
 	const originalStart = parser.start;
+	/** @type {acorn.Position | undefined} */
+	let lineInfo;
 	while (
 		parser.start < parser.input.length &&
 		regex_whitespace_only.test(parser.input[parser.start])
@@ -47,11 +49,14 @@ function skipWhitespace(parser) {
 	}
 	// Update line tracking if whitespace was skipped
 	if (parser.start !== originalStart) {
-		const lineInfo = acorn.getLineInfo(parser.input, parser.start);
+		lineInfo = acorn.getLineInfo(parser.input, parser.start);
 		parser.curLine = lineInfo.line;
 		parser.lineStart = parser.start - lineInfo.column;
-		parser.startLoc = lineInfo;
 	}
+
+	// After skipping whitespace, update startLoc to reflect our actual position
+	// so the next node's start location is correct
+	parser.startLoc = lineInfo || acorn.getLineInfo(parser.input, parser.start);
 }
 
 function isWhitespaceTextNode(node) {
@@ -73,6 +78,8 @@ function RipplePlugin(config) {
 		const original = acorn.Parser.prototype;
 		const tt = Parser.tokTypes || acorn.tokTypes;
 		const tc = Parser.tokContexts || acorn.tokContexts;
+		const tstt = Parser.acornTypeScript.tokTypes;
+		const tstc = Parser.acornTypeScript.tokContexts;
 
 		class RippleParser extends Parser {
 			/** @type {any[]} */
@@ -214,9 +221,8 @@ function RipplePlugin(config) {
 						if (allWhitespace && this.pos + 1 < this.input.length) {
 							const nextChar = this.input.charCodeAt(this.pos + 1);
 							if (nextChar !== 32 && nextChar !== 9 && nextChar !== 10 && nextChar !== 13) {
-								const tokTypes = this.acornTypeScript.tokTypes;
 								++this.pos;
-								return this.finishToken(tokTypes.jsxTagStart);
+								return this.finishToken(tstt.jsxTagStart);
 							}
 						}
 					}
@@ -592,7 +598,7 @@ function RipplePlugin(config) {
 				this.expect(tt.braceL);
 				this.enterScope(0);
 				while (this.type !== tt.braceR) {
-					var stmt = this.parseStatement(null, true);
+					const stmt = this.parseStatement(null, true);
 					body.body.push(stmt);
 				}
 				this.next();
@@ -986,7 +992,7 @@ function RipplePlugin(config) {
 			}
 
 			jsx_parseTupleContainer() {
-				var t = this.startNode();
+				const t = this.startNode();
 				return (
 					this.next(),
 					(t.expression =
@@ -1057,7 +1063,7 @@ function RipplePlugin(config) {
 				if (this.type.label === '@') {
 					this.next(); // consume @
 
-					if (this.type === tt.name || this.type.label === 'jsxName') {
+					if (this.type === tt.name || this.type === tstt.jsxName) {
 						node.name = this.value;
 						node.tracked = true;
 						this.next();
@@ -1066,14 +1072,14 @@ function RipplePlugin(config) {
 						this.unexpected();
 					}
 				} else if (
-					(this.type === tt.name || this.type.label === 'jsxName') &&
+					(this.type === tt.name || this.type === tstt.jsxName) &&
 					this.value &&
 					this.value.startsWith('@')
 				) {
 					node.name = this.value.substring(1);
 					node.tracked = true;
 					this.next();
-				} else if (this.type === tt.name || this.type.keyword || this.type.label === 'jsxName') {
+				} else if (this.type === tt.name || this.type.keyword || this.type === tstt.jsxName) {
 					node.name = this.value;
 					node.tracked = false; // Explicitly mark as not tracked
 					this.next();
@@ -1085,7 +1091,7 @@ function RipplePlugin(config) {
 			}
 
 			jsx_parseElementName() {
-				if (this.type?.label === 'jsxTagEnd') {
+				if (this.type === tstt.jsxTagEnd) {
 					return '';
 				}
 
@@ -1148,17 +1154,15 @@ function RipplePlugin(config) {
 			}
 
 			jsx_parseAttributeValue() {
-				const tok = this.acornTypeScript.tokTypes;
-
 				switch (this.type) {
 					case tt.braceL:
-						var t = this.jsx_parseExpressionContainer();
+						const t = this.jsx_parseExpressionContainer();
 						return (
 							'JSXEmptyExpression' === t.expression.type &&
 								this.raise(t.start, 'attributes must only be assigned a non-empty expression'),
 							t
 						);
-					case tok.jsxTagStart:
+					case tstt.jsxTagStart:
 					case tt.string:
 						return this.parseExprAtom();
 					default:
@@ -1179,7 +1183,7 @@ function RipplePlugin(config) {
 				}
 
 				if (this.type === tt._catch) {
-					var clause = this.startNode();
+					const clause = this.startNode();
 					this.next();
 					if (this.eat(tt.parenL)) {
 						clause.param = this.parseCatchClauseParam();
@@ -1209,7 +1213,6 @@ function RipplePlugin(config) {
 				}
 				let out = '',
 					chunkStart = this.pos;
-				const tok = this.acornTypeScript.tokTypes;
 
 				while (true) {
 					if (this.pos >= this.input.length) this.raise(this.start, 'Unterminated JSX contents');
@@ -1220,7 +1223,7 @@ function RipplePlugin(config) {
 						case 123: // '{'
 							if (ch === 60 && this.exprAllowed) {
 								++this.pos;
-								return this.finishToken(tok.jsxTagStart);
+								return this.finishToken(tstt.jsxTagStart);
 							}
 							if (ch === 123 && this.exprAllowed) {
 								return this.getTokenFromCode(ch);
@@ -1359,7 +1362,6 @@ function RipplePlugin(config) {
 				const inside_head = this.#path.findLast(
 					(n) => n.type === 'Element' && n.id.type === 'Identifier' && n.id.name === 'head',
 				);
-				const tok = this.acornTypeScript.tokTypes;
 				// Adjust the start so we capture the `<` as part of the element
 				const prev_pos = this.pos;
 				this.pos = this.start - 1;
@@ -1444,7 +1446,7 @@ function RipplePlugin(config) {
 						}
 						this.pos = start + content.length + 1;
 
-						this.type = tok.jsxTagStart;
+						this.type = tstt.jsxTagStart;
 						this.next();
 						if (this.value === '/') {
 							this.next();
@@ -1481,7 +1483,7 @@ function RipplePlugin(config) {
 						}
 						this.pos = start + content.length + 1;
 
-						this.type = tok.jsxTagStart;
+						this.type = tstt.jsxTagStart;
 						this.next();
 						if (this.value === '/') {
 							this.next();
@@ -1495,10 +1497,9 @@ function RipplePlugin(config) {
 						element.children = [parsed_css];
 
 						// Ensure we escape JSX <tag></tag> context
-						const tokContexts = this.acornTypeScript.tokContexts;
 						const curContext = this.curContext();
 
-						if (curContext === tokContexts.tc_expr) {
+						if (curContext === tstc.tc_expr) {
 							this.context.pop();
 						}
 
@@ -1535,7 +1536,7 @@ function RipplePlugin(config) {
 								raise_error();
 							}
 							this.next();
-							if (this.type.label !== 'jsxTagEnd') {
+							if (this.type !== tstt.jsxTagEnd) {
 								raise_error();
 							}
 							this.next();
@@ -1551,10 +1552,9 @@ function RipplePlugin(config) {
 						}
 					}
 					// Ensure we escape JSX <tag></tag> context
-					const tokContexts = this.acornTypeScript.tokContexts;
 					const curContext = this.curContext();
 
-					if (curContext === tokContexts.tc_expr) {
+					if (curContext === tstc.tc_expr) {
 						this.context.pop();
 					}
 				}
@@ -1584,23 +1584,28 @@ function RipplePlugin(config) {
 					this.exprAllowed = true;
 
 					while (true) {
-						const node = super.parseExpression();
-						body.push(node);
-
 						if (this.input.slice(this.pos, this.pos + 5) === '/tsx:') {
 							return;
 						}
+
+						if (this.type === tt.braceL) {
+							const node = this.jsx_parseExpressionContainer();
+							body.push(node);
+						} else {
+							// Parse regular JSX expression (JSXElement, JSXFragment, etc.)
+							const node = super.parseExpression();
+							body.push(node);
+						}
 					}
 				}
-
-				if (this.type.label === '{') {
+				if (this.type === tt.braceL) {
 					const node = this.jsx_parseExpressionContainer();
 					node.type = node.html ? 'Html' : 'Text';
 					delete node.html;
 					body.push(node);
-				} else if (this.type.label === '}') {
+				} else if (this.type === tt.braceR) {
 					return;
-				} else if (this.type.label === 'jsxTagStart') {
+				} else if (this.type === tstt.jsxTagStart) {
 					this.next();
 					if (this.value === '/') {
 						this.next();
@@ -1658,7 +1663,7 @@ function RipplePlugin(config) {
 
 					// Ensure we're not in JSX context before recursing
 					// This is important when elements are parsed at statement level
-					if (this.curContext() === this.acornTypeScript.tokContexts.tc_expr) {
+					if (this.curContext() === tstc.tc_expr) {
 						this.context.pop();
 					}
 				}
@@ -1667,14 +1672,12 @@ function RipplePlugin(config) {
 			}
 
 			parseStatement(context, topLevel, exports) {
-				const tok = this.acornTypeScript.tokContexts;
-
 				if (
 					context !== 'for' &&
 					context !== 'if' &&
 					this.context.at(-1) === tc.b_stat &&
 					this.type === tt.braceL &&
-					this.context.some((c) => c === tok.tc_expr)
+					this.context.some((c) => c === tstt.tc_expr)
 				) {
 					this.next();
 					const node = this.jsx_parseExpressionContainer();
@@ -1739,7 +1742,7 @@ function RipplePlugin(config) {
 					}
 				}
 
-				if (this.type.label === 'jsxTagStart') {
+				if (this.type === tstt.jsxTagStart) {
 					this.next();
 					if (this.value === '/') {
 						this.unexpected();
@@ -1925,7 +1928,11 @@ function get_comment_handlers(source, comments, index = 0) {
 						// Handle JSXEmptyExpression - these represent {/* comment */} in JSX
 						if (node.type === 'JSXEmptyExpression') {
 							// Collect all comments that fall within this JSXEmptyExpression
-							while (comments[0] && comments[0].start >= node.start && comments[0].end <= node.end) {
+							while (
+								comments[0] &&
+								comments[0].start >= node.start &&
+								comments[0].end <= node.end
+							) {
 								comment = /** @type {CommentWithLocation} */ (comments.shift());
 								(node.innerComments ||= []).push(comment);
 							}
