@@ -1,5 +1,5 @@
 {
-	"name": "vite-template-ripple",
+	"name": "@ripple-ts/template-basic",
 	"version": "0.0.0",
 	"description": "",
 	"type": "module",
@@ -18,14 +18,15 @@
 	"license": "MIT",
 	"devDependencies": {
 		"eslint": "^9.0.0",
-		"eslint-plugin-ripple": "^0.1.0",
+		"@ripple-ts/eslint-plugin": "latest",
 		"prettier": "^3.6.2",
-		"prettier-plugin-ripple": "^0.2.29",
+		"@ripple-ts/prettier-plugin": "latest",
 		"typescript": "^5.9.2",
 		"vite": "^7.1.4",
-		"vite-plugin-ripple": "^0.2.29"
+		"@ripple-ts/vite-plugin": "latest",
+		"@ripple-ts/typescript-plugin": "latest"
 	},
 	"dependencies": {
-		"ripple": "^0.2.29"
+		"ripple": "latest"
 	}
 }

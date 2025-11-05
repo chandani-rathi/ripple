@@ -5,17 +5,15 @@
   </picture>
 </a>
 
-[![CI](https://github.com/trueadm/ripple/actions/workflows/ci.yml/badge.svg)](https://github.com/trueadm/ripple/actions/workflows/ci.yml)
+[![CI](https://github.com/Ripple-TS/ripple/actions/workflows/ci.yml/badge.svg)](https://github.com/Ripple-TS/ripple/actions/workflows/ci.yml)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?logo=discord&logoColor=white)](https://discord.gg/JBF2ySrh2W)
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz_small.svg)](https://stackblitz.com/github/trueadm/ripple/tree/main/templates/basic)
+[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz_small.svg)](https://stackblitz.com/github/Ripple-TS/ripple/tree/main/templates/basic)
 
-# RippleJS
-
-> Currently, this project is still in early development, and should not be used in production.
+# Ripple TS
 
 Ripple is a TypeScript UI framework that combines the best parts of React, Solid, and Svelte. Created by [@trueadm](https://github.com/trueadm), who has contributed to [Inferno](https://github.com/infernojs/inferno), [React](https://github.com/facebook/react), [Lexical](https://github.com/facebook/lexical), and [Svelte 5](https://github.com/sveltejs/svelte).
 
-**Key Philosophy:** Ripple is JS/TS-first with its own `.ripple` file extension, allowing seamless TypeScript integration and a unique syntax that enhances both human and LLM developer experience.
+**Key Philosophy:** Ripple is TS-first with its own `.ripple` file extension, allowing seamless TypeScript integration and a unique syntax that enhances both human and LLM developer experience.
 
 📚 **[Full Documentation](https://www.ripplejs.com/docs)** | 🎮 **[Interactive Playground](https://www.ripplejs.com/playground)**
 
@@ -43,7 +41,7 @@ npm install && npm run dev
 ### Using Template
 
 ```bash
-npx degit trueadm/ripple/templates/basic my-app
+npx degit Ripple-TS/ripple/templates/basic my-app
 cd my-app
 npm install && npm run dev
 ```
@@ -71,7 +69,7 @@ mount(App, {
 
 ## 🔧 VSCode Extension
 
-Install the [Ripple VSCode extension](https://marketplace.visualstudio.com/items?itemName=ripplejs.ripple-vscode-plugin) for:
+Install the [Ripple VSCode extension](https://marketplace.visualstudio.com/items?itemName=ripple-ts.vscode-plugin) for:
 
 - Syntax highlighting
 - TypeScript integration
@@ -394,7 +392,7 @@ export component App() {
 
 - 📚 **[Full Documentation](https://www.ripplejs.com/docs)** - Complete guide and API reference
 - 🎮 **[Interactive Playground](https://www.ripplejs.com/playground)** - Try Ripple in your browser
-- 🐛 **[GitHub Issues](https://github.com/trueadm/ripple/issues)** - Report bugs or request features
+- 🐛 **[GitHub Issues](https://github.com/Ripple-TS/ripple/issues)** - Report bugs or request features
 - 💬 **[Discord Community](https://discord.gg/JBF2ySrh2W)** - Get help and discuss Ripple
 - 📦 **[npm Package](https://www.npmjs.com/package/ripple)** - Install from npm
 
