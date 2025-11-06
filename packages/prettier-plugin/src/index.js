@@ -1163,10 +1163,19 @@ function printRippleNode(node, path, options, print, args) {
 			break;
 		}
 
+		case 'TSNonNullExpression': {
+			nodeContent = concat([path.call(print, 'expression'), '!']);
+			break;
+		}
+
+		case 'JSXExpressionContainer': {
+			nodeContent = concat(['{', path.call(print, 'expression'), '}']);
+			break;
+		}
+
 		case 'NewExpression':
 			nodeContent = printNewExpression(node, path, options, print);
 			break;
-
 		case 'TemplateLiteral':
 			nodeContent = printTemplateLiteral(node, path, options, print);
 			break;
@@ -1324,8 +1333,10 @@ function printRippleNode(node, path, options, print, args) {
 			const trackedPrefix = node.tracked ? '@' : '';
 			let identifierContent;
 			if (node.typeAnnotation) {
+				const optionalMarker = node.optional ? '?' : '';
 				identifierContent = concat([
 					trackedPrefix + node.name,
+					optionalMarker,
 					': ',
 					path.call(print, 'typeAnnotation'),
 				]);
@@ -1348,7 +1359,6 @@ function printRippleNode(node, path, options, print, args) {
 			}
 			break;
 		}
-
 		case 'Literal':
 			// Handle regex literals specially
 			if (node.regex) {
@@ -1645,10 +1655,13 @@ function printRippleNode(node, path, options, print, args) {
 			nodeContent = printTSPropertySignature(node, path, options, print);
 			break;
 
+		case 'TSMethodSignature':
+			nodeContent = printTSMethodSignature(node, path, options, print);
+			break;
+
 		case 'TSEnumMember':
 			nodeContent = printTSEnumMember(node, path, options, print);
 			break;
-
 		case 'TSLiteralType':
 			nodeContent = path.call(print, 'literal');
 			break;
@@ -3863,6 +3876,47 @@ function printTSPropertySignature(node, path, options, print) {
 	return concat(parts);
 }
 
+function printTSMethodSignature(node, path, options, print) {
+	const parts = [];
+
+	// Print the method name/key
+	parts.push(path.call(print, 'key'));
+
+	// Add optional marker if present
+	if (node.optional) {
+		parts.push('?');
+	}
+
+	// Add TypeScript generics/type parameters if present
+	if (node.typeParameters) {
+		const typeParams = path.call(print, 'typeParameters');
+		if (Array.isArray(typeParams)) {
+			parts.push(...typeParams);
+		} else {
+			parts.push(typeParams);
+		}
+	}
+
+	// Print parameters - use 'parameters' property for TypeScript signature nodes
+	parts.push('(');
+	if (node.parameters && node.parameters.length > 0) {
+		const params = path.map(print, 'parameters');
+		for (let i = 0; i < params.length; i++) {
+			if (i > 0) parts.push(', ');
+			parts.push(params[i]);
+		}
+	}
+	parts.push(')');
+
+	// Return type annotation
+	if (node.typeAnnotation) {
+		parts.push(': ');
+		parts.push(path.call(print, 'typeAnnotation'));
+	}
+
+	return concat(parts);
+}
+
 function printTSTypeReference(node, path, options, print) {
 	const parts = [path.call(print, 'typeName')];
 
@@ -4276,27 +4330,57 @@ function printTsxCompat(node, path, options, print) {
 	}
 
 	// Print JSXElement children - they remain as JSX
-	// Filter out whitespace-only JSXText nodes
+	// Filter out whitespace-only JSXText nodes and merge adjacent text-like nodes
 	const finalChildren = [];
+	let accumulatedText = '';
 
 	for (let i = 0; i < node.children.length; i++) {
 		const child = node.children[i];
 
-		// Skip whitespace-only JSXText nodes
-		if (child.type === 'JSXText' && !child.value.trim()) {
-			continue;
-		}
+		// Check if this is a text-like node (JSXText or Identifier in JSX context)
+		const isTextLike = child.type === 'JSXText' || child.type === 'Identifier';
 
-		const printedChild = path.call(print, 'children', i);
-		finalChildren.push(printedChild);
+		if (isTextLike) {
+			// Get the text content
+			let text;
+			if (child.type === 'JSXText') {
+				text = child.value.trim();
+			} else if (child.type === 'Identifier') {
+				text = child.name;
+			}
 
-		if (i < node.children.length - 1) {
-			// Only add hardline if the next child is not whitespace-only
-			const nextChild = node.children[i + 1];
-			if (nextChild && !(nextChild.type === 'JSXText' && !nextChild.value.trim())) {
+			if (text) {
+				if (accumulatedText) {
+					accumulatedText += ' ' + text;
+				} else {
+					accumulatedText = text;
+				}
+			}
+		} else {
+			// Before adding non-text node, flush accumulated text
+			if (accumulatedText) {
+				if (finalChildren.length > 0) {
+					finalChildren.push(hardline);
+				}
+				finalChildren.push(accumulatedText);
+				accumulatedText = '';
+			}
+
+			if (finalChildren.length > 0) {
 				finalChildren.push(hardline);
 			}
+
+			const printedChild = path.call(print, 'children', i);
+			finalChildren.push(printedChild);
 		}
+	}
+
+	// Don't forget any remaining accumulated text
+	if (accumulatedText) {
+		if (finalChildren.length > 0) {
+			finalChildren.push(hardline);
+		}
+		finalChildren.push(accumulatedText);
 	}
 
 	// Format the TsxCompat element
@@ -4355,24 +4439,43 @@ function printJSXElement(node, path, options, print) {
 		return concat(['<', tagName, attributesDoc, '></', tagName, '>']);
 	}
 
-	// Format children - filter out empty text nodes
+	// Format children - filter out empty text nodes and merge adjacent text nodes
 	const childrenDocs = [];
+	let currentText = '';
+
 	for (let i = 0; i < node.children.length; i++) {
 		const child = node.children[i];
 
 		if (child.type === 'JSXText') {
-			// Handle JSX text nodes - only include if not just whitespace
-			const text = child.value;
-			if (text.trim()) {
-				childrenDocs.push(text);
+			// Accumulate text content, preserving spaces between words
+			const trimmed = child.value.trim();
+			if (trimmed) {
+				if (currentText) {
+					currentText += ' ' + trimmed;
+				} else {
+					currentText = trimmed;
+				}
 			}
-		} else if (child.type === 'JSXExpressionContainer') {
-			// Handle JSX expression containers
-			childrenDocs.push(concat(['{', path.call(print, 'children', i, 'expression'), '}']));
 		} else {
-			// Handle nested JSX elements
-			childrenDocs.push(path.call(print, 'children', i));
+			// If we have accumulated text, push it before the non-text node
+			if (currentText) {
+				childrenDocs.push(currentText);
+				currentText = '';
+			}
+
+			if (child.type === 'JSXExpressionContainer') {
+				// Handle JSX expression containers
+				childrenDocs.push(concat(['{', path.call(print, 'children', i, 'expression'), '}']));
+			} else {
+				// Handle nested JSX elements
+				childrenDocs.push(path.call(print, 'children', i));
+			}
 		}
+	}
+
+	// Don't forget any remaining text
+	if (currentText) {
+		childrenDocs.push(currentText);
 	}
 
 	// Check if content can be inlined (single text node or single expression)

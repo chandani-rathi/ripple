@@ -2282,6 +2282,44 @@ const items = [] as unknown[];`;
 			expect(result).toBeWithNewline(expected);
 		});
 
+		it('should format TSMethodSignature in interfaces', async () => {
+			const input = `interface API{get(path:string):Promise<Response>;post<T>(path:string,data:T):Promise<Response>;delete?(id:number):void}`;
+			const expected = `interface API {
+  get(path: string): Promise<Response>;
+  post<T>(path: string, data: T): Promise<Response>;
+  delete?(id: number): void;
+}`;
+			const result = await format(input);
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should format TSMethodSignature with type parameters', async () => {
+			const input = `interface Collection{map<U>(fn:(item:T)=>U):U[];filter(predicate:(item:T)=>boolean):T[]}`;
+			const expected = `interface Collection {\n  map<U>(fn: (item: T) => U): U[];\n  filter(predicate: (item: T) => boolean): T[];\n}`;
+			const result = await format(input);
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should format TSNonNullExpression', async () => {
+			const input = `component Test(){let value:string|null=null;let length=value!.length;<div>{length}</div>}`;
+			const expected = `component Test() {
+  let value: string | null = null;
+  let length = value!.length;
+  <div>{length}</div>
+}`;
+			const result = await format(input);
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should format TSNonNullExpression in complex expressions', async () => {
+			const input = `function getValue(x?:string){return x!.toUpperCase()}`;
+			const expected = `function getValue(x?: string) {
+  return x!.toUpperCase();
+}`;
+			const result = await format(input);
+			expect(result).toBeWithNewline(expected);
+		});
+
 		it('should retain templated declarations', async () => {
 			const expected = `function Wrapper() {
   return {
@@ -3769,6 +3807,82 @@ component Polygon() {
       <Counter count={@count} />
     </tsx:react>
   </div>
+}`;
+
+				const result = await format(input, { singleQuote: true });
+				expect(result).toBeWithNewline(expected);
+			});
+
+			it('should format JSXExpressionContainer with function calls', async () => {
+				const input = `function foo(){return 123}component App(){<div><tsx:react>{foo()}</tsx:react></div>}`;
+
+				const expected = `function foo() {
+  return 123;
+}
+component App() {
+  <div>
+    <tsx:react>
+      {foo()}
+    </tsx:react>
+  </div>
+}`;
+
+				const result = await format(input);
+				expect(result).toBeWithNewline(expected);
+			});
+
+			it('should format JSXExpressionContainer with function calls', async () => {
+				const input = `function foo(){return 123}component App(){<div><tsx:react>{foo()}<div>Hello world</div>Hello world</tsx:react></div>}`;
+
+				const expected = `function foo() {
+  return 123;
+}
+component App() {
+  <div>
+    <tsx:react>
+      {foo()}
+      <div>Hello world</div>
+      Hello world
+    </tsx:react>
+  </div>
+}`;
+
+				const result = await format(input);
+				expect(result).toBeWithNewline(expected);
+			});
+
+			it('should format JSXExpressionContainer with function calls #2', async () => {
+				const input = `export component App() {
+	<tsx:react>
+		Hello world
+		<DemoContext.Provider value={"Hello from Context!"}>
+			<Child count={@count} />
+		</DemoContext.Provider>
+	</tsx:react>
+}`;
+				const expected = `export component App() {
+  <tsx:react>
+    Hello world
+    <DemoContext.Provider value={"Hello from Context!"}>
+      <Child count={@count} />
+    </DemoContext.Provider>
+  </tsx:react>
+}`;
+
+				const result = await format(input);
+				expect(result).toBeWithNewline(expected);
+			});
+			it('should format JSXExpressionContainer with complex expressions', async () => {
+				const input = `component App(){let count=track(0);<tsx:react><div>{count*2+10}</div>{getMessage("test")}</tsx:react>}`;
+
+				const expected = `component App() {
+  let count = track(0);
+  <tsx:react>
+    <div>
+      {count * 2 + 10}
+    </div>
+    {getMessage('test')}
+  </tsx:react>
 }`;
 
 				const result = await format(input, { singleQuote: true });
