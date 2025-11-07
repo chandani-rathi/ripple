@@ -902,6 +902,44 @@ export component Test({ a, b }: Props) {}`;
 			expect(result).toBeWithNewline(expected);
 		});
 
+		it('should not strip @ from dynamic self-closing components', async () => {
+			const expected = `component App() {
+  <@tracked_object.@tracked_basic />
+}`;
+
+			const result = await format(expected, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should keep @ on dynamic object member array expressions', async () => {
+			const expected = `component App() {
+  const obj = {
+    [0]: track(0),
+  };
+
+  <div>{obj.@[0]}</div>
+
+  <button
+    onClick={() => {
+      obj.@[0]++;
+    }}
+  >
+    {'Increment'}
+  </button>
+
+  <button
+    onClick={() => {
+      obj.@[0] += 1;
+    }}
+  >
+    {'Increment'}
+  </button>
+}`;
+
+			const result = await format(expected, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
+
 		it('keeps a new line between comments above and code if one is present', async () => {
 			const expected = `// comment
 
@@ -1100,6 +1138,30 @@ const [obj1, obj2] = arrayOfObjects;`;
 		it('should keep TrackedMap short syntax intact', async () => {
 			const expected = `const map = new #Map([['key1', 'value1'], ['key2', 'value2']]);
 const set = new #Set([1, 2, 3]);`;
+
+			const result = await format(expected, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should keep TrackedSet parents with short syntax and no args intact', async () => {
+			const expected = `component SetTest() {
+  let items = new #Set();
+
+  <button onClick={() => items.add(1)}>{'add'}</button>
+  <pre>{items.size}</pre>
+}`;
+
+			const result = await format(expected, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should keep TrackedMap parents with short syntax and no args intact', async () => {
+			const expected = `component MapTest() {
+  let items = new #Map();
+
+  <button onClick={() => items.set('key', 1)}>{'add'}</button>
+  <pre>{items.size}</pre>
+}`;
 
 			const result = await format(expected, { singleQuote: true, printWidth: 100 });
 			expect(result).toBeWithNewline(expected);
@@ -1496,6 +1558,59 @@ const program =
 			const result = await format(input, { singleQuote: true, printWidth: 30 });
 			expect(result).toBeWithNewline(expected);
 		});
+
+		it('should keep blank lines between commented out block and markup', async () => {
+			const expected = `function CounterWrapper(props) {
+  const more = {
+    double: track(() => props.count * 2),
+    another: track(0),
+    onemore: 100,
+  };
+
+  // if (props.@count > 1) {
+  // 	delete more.another;
+  // }
+
+  <div>
+    <Counter {...props} {...more} />
+  </div>
+}`;
+
+			const result = await format(expected, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should keep parens around negating key in object expression', async () => {
+			const input = `effect(() => {
+  props.count;
+  if (props.count > 1 && 'another' in more) {
+  	untrack(() => delete more.another);
+  } else if (props.count > 2 && !('another' in more)) {
+  	untrack(() => more.another = 0);
+  }
+  untrack(() => console.log(more));
+});`;
+
+			const expected = `effect(() => {
+  props.count;
+  if (props.count > 1 && 'another' in more) {
+    untrack(() => delete more.another);
+  } else if (props.count > 2 && !('another' in more)) {
+    untrack(() => (more.another = 0));
+  }
+  untrack(() => console.log(more));
+});`;
+
+			const result = await format(input, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
+
+		it('should keep parents in math subtraction and multiplication', async () => {
+			const expected = `let offset = track(() => (@page - 1) * @limit);`;
+
+			const result = await format(expected, { singleQuote: true, printWidth: 100 });
+			expect(result).toBeWithNewline(expected);
+		});
 	});
 
 	describe('edge cases', () => {
@@ -1763,6 +1878,53 @@ const obj2 = #{
 }`;
 
 		const result = await format(input, { singleQuote: true });
+		expect(result).toBeWithNewline(expected);
+	});
+
+	it('should preserve comment if the whole component code is commented out', async () => {
+		const expected = `export component Test() {
+  // thing
+  // thing
+  // thing
+}`;
+
+		const result = await format(expected, { singleQuote: true });
+		expect(result).toBeWithNewline(expected);
+	});
+
+	it('should preserve comment if the whole component code is commented out, including blank lines', async () => {
+		const expected = `export component Test() {
+  // thing
+  // thing
+  /* thing */
+  // thing
+
+  /* thing */
+  // thing
+
+  /* thing */
+  // thing
+}`;
+
+		const result = await format(expected, { singleQuote: true });
+		expect(result).toBeWithNewline(expected);
+	});
+
+	it('should preserve comment if the whole function code is commented out, including blank lines', async () => {
+		const expected = `export function Test() {
+  // thing
+  // thing
+  /* thing */
+  // thing
+
+  /* thing */
+  // thing
+
+  /* thing */
+  // thing
+}`;
+
+		const result = await format(expected, { singleQuote: true });
 		expect(result).toBeWithNewline(expected);
 	});
 
@@ -3886,6 +4048,32 @@ component App() {
 }`;
 
 				const result = await format(input, { singleQuote: true });
+				expect(result).toBeWithNewline(expected);
+			});
+		});
+
+		describe('object getters and setters', () => {
+			it('should preserve get and set keywords in object methods', async () => {
+				const input = `const foo = {
+    get bar() {
+        return 0
+    },
+
+    set baz(arg: 0) {
+        //
+    }
+}`;
+				const expected = `const foo = {
+  get bar() {
+    return 0;
+  },
+
+  set baz(arg: 0) {
+    //
+  },
+};`;
+
+				const result = await format(input);
 				expect(result).toBeWithNewline(expected);
 			});
 		});
