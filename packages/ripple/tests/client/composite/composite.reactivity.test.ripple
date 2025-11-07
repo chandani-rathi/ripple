@@ -206,7 +206,7 @@ describe('composite > reactivity', () => {
 
 		component Child({ a, b, c }: { a: number; b: number; c: number }) {
 			effect(() => {
-				logs.push(`Child effect: ${a}, ${b}, ${c}`);
+				logs.push(`Child effect: ${@a}, ${@b}, ${@c}`);
 			});
 
 			<div>{a + ' ' + b + ' ' + c}</div>
@@ -325,5 +325,24 @@ describe('composite > reactivity', () => {
 		expect(div.getAttribute('another')).toBe('0');
 		expect(div.getAttribute('onemore')).toBe('100');
 		expect(div.textContent).toBe('Counter: 2 Double: 4');
+	});
+
+	it('keeps refs on elements for element spreads', () => {
+		const ref_fn = vi.fn();
+		component App() {
+			const props = {};
+			<Button {ref ref_fn} {...props}>{'Toggle'}</Button>
+		}
+
+		component Button({ children, ...props }) {
+			<button {...@props}>
+				<@children />
+			</button>
+		}
+
+		render(App);
+		flushSync();
+
+		expect(ref_fn).toBeCalled();
 	});
 });
