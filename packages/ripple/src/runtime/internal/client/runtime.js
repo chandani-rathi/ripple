@@ -933,13 +933,40 @@ export function spread_props(fn) {
  * @returns {Object}
  */
 export function proxy_props(fn) {
+	/** @type {Record<string | symbol, any> | Record<string | symbol, any>[]} */
+	var obj_instance = fn();
+	/** @type {(string | symbol)[]} */
+	var cache_symbol_keys = [];
+
+	/** @type {Record<string | symbol, any>} */
+	var cache_obj_symbols = {};
+	if (is_array(obj_instance)) {
+		var item;
+		for (var i = obj_instance.length - 1; i >= 0; i--) {
+			item = obj_instance[i];
+			const keys = get_own_property_symbols(item);
+			cache_symbol_keys.push(...keys);
+			for (let j = keys.length - 1; j >= 0; j--) {
+				const key = keys[j];
+				cache_obj_symbols[key] = item[key];
+			}
+		}
+	} else {
+		const keys = get_own_property_symbols(obj_instance);
+		cache_symbol_keys.push(...keys);
+		for (let j = keys.length - 1; j >= 0; j--) {
+			const key = keys[j];
+			cache_obj_symbols[key] = obj_instance[key];
+		}
+	}
+
 	return new Proxy(
 		{},
 		{
 			get(_, property) {
+				if (cache_obj_symbols[property]) return cache_obj_symbols[property];
 				/** @type {Record<string | symbol, any> | Record<string | symbol, any>[]} */
 				var obj = fn();
-
 				// Handle array of objects/spreads (for multiple props)
 				if (is_array(obj)) {
 					// Search in reverse order (right-to-left) since later props override earlier ones
@@ -961,9 +988,11 @@ export function proxy_props(fn) {
 				if (property === TRACKED_OBJECT) {
 					return true;
 				}
+
+				if (property in cache_obj_symbols) return true;
+
 				/** @type {Record<string | symbol, any> | Record<string | symbol, any>[]} */
 				var obj = fn();
-
 				// Handle array of objects/spreads
 				if (is_array(obj)) {
 					for (var i = obj.length - 1; i >= 0; i--) {
@@ -977,9 +1006,11 @@ export function proxy_props(fn) {
 				return property in obj;
 			},
 			getOwnPropertyDescriptor(_, key) {
+				if (key in cache_obj_symbols) {
+					return get_descriptor(cache_obj_symbols, key);
+				}
 				/** @type {Record<string | symbol, any> | Record<string | symbol, any>[]} */
 				var obj = fn();
-
 				// Handle array of objects/spreads
 				if (is_array(obj)) {
 					/** @type {Record<string | symbol, any>} */
@@ -1003,7 +1034,7 @@ export function proxy_props(fn) {
 				/** @type {Record<string | symbol, 1>} */
 				var done = {};
 				/** @type {(string | symbol)[]} */
-				var keys = [];
+				var keys = [...cache_symbol_keys];
 
 				// Handle array of objects/spreads
 				if (is_array(obj)) {
@@ -1013,17 +1044,24 @@ export function proxy_props(fn) {
 					for (var i = 0; i < obj.length; i++) {
 						item = obj[i];
 						for (const key of Reflect.ownKeys(item)) {
-							if (done[key]) {
+							if (typeof key === 'symbol' || done[key]) {
 								continue;
 							}
 							done[key] = 1;
 							keys.push(key);
 						}
 					}
-					return keys;
+				} else {
+					for (const key of Reflect.ownKeys(obj)) {
+						if (typeof key === 'symbol' || done[key]) {
+							continue;
+						}
+						done[key] = 1;
+						keys.push(key);
+					}
 				}
 
-				return Reflect.ownKeys(obj);
+				return keys;
 			},
 		},
 	);
